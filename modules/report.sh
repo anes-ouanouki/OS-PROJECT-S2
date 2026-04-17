@@ -1,0 +1,772 @@
+#!/bin/bash
+# This script builds the final reports and handles report paths.
+# it prepares names, latest links, hashes, and output rendering,
+# so the rest of the project can work with reports in one place.
+
+# This first part collects the common report metadata.
+# it keeps the report name and folder helpers together,
+# so text and html generation can reuse the same setup.
+report_os_name() {
+    local OS_NAME
+    OS_NAME=$(awk -F= '/^PRETTY_NAME=/{gsub(/"/, "", $2); print $2; exit}' /etc/os-release 2>/dev/null)
+    printf '%s\n' "${OS_NAME:-$(uname -s)}"
+}
+
+normalize_report_dir() {
+    if [ -z "${REPORT_DIR:-}" ]; then
+        REPORT_DIR="${SCRIPT_DIR:-.}/reports"
+        return
+    fi
+
+    case "$REPORT_DIR" in
+        /*) ;;
+        ./*)
+            if [ -n "${SCRIPT_DIR:-}" ]; then
+                REPORT_DIR="$SCRIPT_DIR/${REPORT_DIR#./}"
+            fi
+            ;;
+        *)
+            if [ -n "${SCRIPT_DIR:-}" ]; then
+                REPORT_DIR="$SCRIPT_DIR/$REPORT_DIR"
+            fi
+            ;;
+    esac
+}
+
+init_report_dir() {
+    normalize_report_dir
+
+    mkdir -p "$REPORT_DIR" 2>/dev/null || {
+        echo "[!] Cannot create report directory: $REPORT_DIR"
+        REPORT_DIR="/tmp/sys_audit_reports"
+        mkdir -p "$REPORT_DIR"
+        echo "[i] Using fallback: $REPORT_DIR"
+    }
+}
+
+# This second part manages hashes and latest symbolic links.
+# it keeps the portable hash files and stable latest_* names updated,
+# so sending, verifying, and opening reports stay easier.
+canonical_existing_path() {
+    local INPUT_PATH=$1
+
+    if command -v realpath >/dev/null 2>&1; then
+        realpath -e "$INPUT_PATH" 2>/dev/null && return 0
+    fi
+
+    (
+        cd "$(dirname "$INPUT_PATH")" 2>/dev/null || exit 1
+        printf '%s/%s\n' "$PWD" "$(basename "$INPUT_PATH")"
+    )
+}
+
+update_latest_symlink() {
+    local FILE=$1
+    local LINK_PATH=$2
+
+    ln -sfn "$(basename "$FILE")" "$LINK_PATH" 2>/dev/null
+}
+
+create_report_hash() {
+    local FILE=$1
+
+    (
+        cd "$(dirname "$FILE")" 2>/dev/null || exit 1
+        sha256sum "$(basename "$FILE")" > "$(basename "$FILE").sha256"
+    ) 2>/dev/null
+}
+repair_legacy_report_link() {
+    local link=$1
+
+    # not a symlink → nothing to do
+    [ -L "$link" ] || return 0
+
+    local target
+    target=$(readlink "$link" 2>/dev/null) || return 0
+
+    # only care about legacy format
+    case "$target" in
+        ./reports/*)
+            local new_path="${link%/*}/${target#./reports/}"
+
+            # if file exists, repoint symlink to new location
+            [ -f "$new_path" ] && ln -sfn "$new_path" "$link"
+            ;;
+    esac
+}
+
+# This part resolves report file names before they are reused elsewhere.
+# it repairs old link targets and expands simple input names,
+# so email, remote copy, compare, and verify all use real files.
+repair_report_symlinks() {
+    init_report_dir
+    repair_legacy_report_link "$REPORT_DIR/latest_short.txt"
+    repair_legacy_report_link "$REPORT_DIR/latest_full.txt"
+    repair_legacy_report_link "$REPORT_DIR/latest_short.html"
+    repair_legacy_report_link "$REPORT_DIR/latest_full.html"
+}
+resolve_report_candidate() {
+    local c=$1
+    [ -n "$c" ] || return 1
+
+    # if symlink, attempt repair first
+    [ -L "$c" ] && repair_legacy_report_link "$c"
+
+    # direct file hit
+    if [ -f "$c" ]; then
+        canonical_existing_path "$c"
+        return
+    fi
+
+    # symlink resolution fallback
+    if [ -L "$c" ]; then
+        local t
+        t=$(readlink "$c" 2>/dev/null) || return 1
+
+        case "$t" in
+            /*) ;;
+            *) t="$(dirname "$c")/$t" ;;
+        esac
+
+        [ -f "$t" ] && canonical_existing_path "$t" && return
+    fi
+
+    return 1
+}
+
+resolve_report_file() {
+    local INPUT_PATH=$1
+
+    [ -n "$INPUT_PATH" ] || return 1
+
+    init_report_dir
+
+    resolve_report_candidate "$INPUT_PATH" && return 0
+
+    if [[ "$INPUT_PATH" != /* ]]; then
+        if [[ "$INPUT_PATH" != */* ]]; then
+            resolve_report_candidate "$REPORT_DIR/$INPUT_PATH" && return 0
+        fi
+
+        if [ -n "${SCRIPT_DIR:-}" ]; then
+            resolve_report_candidate "$SCRIPT_DIR/$INPUT_PATH" && return 0
+        fi
+    fi
+
+    return 1
+}
+
+# This small helper protects report text before it goes into html.
+# it escapes the main html characters,
+# so command output does not break the generated page.
+html_escape() {
+    sed -e 's/&/\&amp;/g' -e 's/</\&lt;/g' -e 's/>/\&gt;/g'
+}
+
+report_header() {
+    local TYPE=$1
+    echo "============================================================"
+    echo "  LINUX SYSTEM AUDIT REPORT - ${TYPE^^}"
+    echo "============================================================"
+    echo "  Hostname    : $(hostname)"
+    echo "  Date/Time   : $(date '+%Y-%m-%d %H:%M:%S')"
+    echo "  OS          : $(report_os_name)"
+    echo "  Kernel      : $(uname -r)"
+    echo "  Generated by: sys_audit v1.0"
+    echo "============================================================"
+    echo ""
+}
+
+report_footer() {
+    echo ""
+    echo "============================================================"
+    echo "  END OF REPORT"
+    echo "  Generated: $(date '+%Y-%m-%d %H:%M:%S')"
+    echo "============================================================"
+}
+
+# This section builds the four report formats.
+# it keeps text and html generation in one module,
+# so the menu only needs to call the matching function.
+generate_short_txt() {
+    init_report_dir
+
+    local TIMESTAMP
+    local FILE
+
+    TIMESTAMP=$(date +"%Y%m%d_%H%M%S")
+    FILE="$REPORT_DIR/short_$(hostname)_${TIMESTAMP}.txt"
+
+    {
+        report_header "SHORT"
+        hw_summary
+        echo ""
+        sw_summary
+        report_footer
+    } > "$FILE" 2>&1
+
+    update_latest_symlink "$FILE" "$REPORT_DIR/latest_short.txt"
+    create_report_hash "$FILE"
+
+    echo "[+] Short report saved : $FILE"
+    echo "[+] Integrity hash     : ${FILE}.sha256"
+}
+
+generate_full_txt() {
+    init_report_dir
+
+    local TIMESTAMP
+    local FILE
+
+    TIMESTAMP=$(date +"%Y%m%d_%H%M%S")
+    FILE="$REPORT_DIR/full_$(hostname)_${TIMESTAMP}.txt"
+
+    {
+        report_header "FULL"
+        echo "=== HARDWARE AUDIT ==="
+        hw_full
+        echo ""
+        echo "=== SOFTWARE AUDIT ==="
+        sw_full
+        report_footer
+    } > "$FILE" 2>&1
+
+    update_latest_symlink "$FILE" "$REPORT_DIR/latest_full.txt"
+    create_report_hash "$FILE"
+
+    echo "[+] Full report saved  : $FILE"
+    echo "[+] Integrity hash     : ${FILE}.sha256"
+}
+
+generate_short_html() {
+    init_report_dir
+
+    local TIMESTAMP
+    local FILE
+    local HOST_NAME
+    local REPORT_TIME
+    local OS_NAME
+    local KERNEL_VERSION
+    local HW_CONTENT
+    local SW_CONTENT
+
+    TIMESTAMP=$(date +"%Y%m%d_%H%M%S")
+    FILE="$REPORT_DIR/short_$(hostname)_${TIMESTAMP}.html"
+    HOST_NAME=$(hostname)
+    REPORT_TIME=$(date '+%Y-%m-%d %H:%M:%S')
+    OS_NAME=$(report_os_name)
+    KERNEL_VERSION=$(uname -r)
+    HW_CONTENT=$(hw_summary 2>&1 | html_escape)
+    SW_CONTENT=$(sw_summary 2>&1 | html_escape)
+
+    cat > "$FILE" <<HTML
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>System Audit Report - Short - ${HOST_NAME}</title>
+    <style>
+        :root {
+            --bg: #08111d;
+            --bg-accent: #12314a;
+            --panel: rgba(9, 18, 31, 0.92);
+            --panel-soft: rgba(20, 35, 54, 0.82);
+            --border: rgba(144, 188, 222, 0.18);
+            --text: #ecf4fb;
+            --muted: #9eb6ca;
+            --accent: #67e8f9;
+            --accent-strong: #8b5cf6;
+            --success: #7dd3a7;
+            --shadow: 0 24px 60px rgba(0, 0, 0, 0.35);
+        }
+
+        * { box-sizing: border-box; }
+
+        body {
+            margin: 0;
+            min-height: 100vh;
+            color: var(--text);
+            background:
+                radial-gradient(circle at top left, rgba(103, 232, 249, 0.16), transparent 28rem),
+                radial-gradient(circle at top right, rgba(139, 92, 246, 0.18), transparent 24rem),
+                linear-gradient(180deg, var(--bg-accent) 0%, var(--bg) 48%, #04080f 100%);
+            font-family: "IBM Plex Sans", "Aptos", "Trebuchet MS", sans-serif;
+        }
+
+        .page {
+            max-width: 1100px;
+            margin: 0 auto;
+            padding: 40px 20px 64px;
+        }
+
+        .hero,
+        .panel {
+            border: 1px solid var(--border);
+            border-radius: 24px;
+            background: var(--panel);
+            box-shadow: var(--shadow);
+        }
+
+        .hero {
+            padding: 32px;
+        }
+
+        .eyebrow {
+            display: inline-block;
+            padding: 6px 12px;
+            border-radius: 999px;
+            background: rgba(103, 232, 249, 0.12);
+            color: var(--accent);
+            font-family: "IBM Plex Mono", "Fira Code", "Courier New", monospace;
+            font-size: 0.78rem;
+            letter-spacing: 0.12em;
+            text-transform: uppercase;
+        }
+
+        h1 {
+            margin: 16px 0 10px;
+            font-size: clamp(2rem, 4vw, 3.3rem);
+            line-height: 1.05;
+        }
+
+        .subhead {
+            margin: 0;
+            max-width: 56rem;
+            color: var(--muted);
+            font-size: 1rem;
+            line-height: 1.7;
+        }
+
+        .meta-grid,
+        .content-grid {
+            display: grid;
+            gap: 16px;
+            margin-top: 24px;
+        }
+
+        .meta-grid {
+            grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+        }
+
+        .content-grid {
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+        }
+
+        .meta-card {
+            padding: 16px 18px;
+            border-radius: 18px;
+            border: 1px solid var(--border);
+            background: var(--panel-soft);
+        }
+
+        .meta-card .label {
+            color: var(--muted);
+            font-size: 0.78rem;
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
+        }
+
+        .meta-card .value {
+            margin-top: 8px;
+            font-family: "IBM Plex Mono", "Fira Code", "Courier New", monospace;
+            font-size: 0.96rem;
+        }
+
+        .panel {
+            padding: 24px;
+        }
+
+        .panel h2 {
+            margin: 0 0 16px;
+            color: var(--success);
+            font-size: 1.05rem;
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
+        }
+
+        pre {
+            margin: 0;
+            font-family: "IBM Plex Mono", "Fira Code", "Courier New", monospace;
+            font-size: 0.92rem;
+            line-height: 1.6;
+            white-space: pre-wrap;
+            word-break: break-word;
+            color: var(--text);
+        }
+
+        footer {
+            margin-top: 20px;
+            text-align: right;
+            color: var(--muted);
+            font-size: 0.88rem;
+        }
+
+        @media (max-width: 720px) {
+            .page {
+                padding: 24px 14px 40px;
+            }
+
+            .hero,
+            .panel {
+                border-radius: 20px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <main class="page">
+        <section class="hero">
+            <span class="eyebrow">sys_audit short report</span>
+            <h1>Linux System Audit</h1>
+            <p class="subhead">
+                A quick operational snapshot of the host with the most useful hardware,
+                software, and network details kept visible without the package-list noise.
+            </p>
+            <div class="meta-grid">
+                <div class="meta-card">
+                    <div class="label">Hostname</div>
+                    <div class="value">${HOST_NAME}</div>
+                </div>
+                <div class="meta-card">
+                    <div class="label">Generated</div>
+                    <div class="value">${REPORT_TIME}</div>
+                </div>
+                <div class="meta-card">
+                    <div class="label">Operating System</div>
+                    <div class="value">${OS_NAME}</div>
+                </div>
+                <div class="meta-card">
+                    <div class="label">Kernel</div>
+                    <div class="value">${KERNEL_VERSION}</div>
+                </div>
+            </div>
+        </section>
+
+        <section class="content-grid">
+            <article class="panel">
+                <h2>Hardware Summary</h2>
+                <pre>${HW_CONTENT}</pre>
+            </article>
+            <article class="panel">
+                <h2>Software Summary</h2>
+                <pre>${SW_CONTENT}</pre>
+            </article>
+        </section>
+
+        <footer>Generated by sys_audit v1.0</footer>
+    </main>
+</body>
+</html>
+HTML
+
+    update_latest_symlink "$FILE" "$REPORT_DIR/latest_short.html"
+    create_report_hash "$FILE"
+
+    echo "[+] Short HTML report  : $FILE"
+    echo "[+] Integrity hash     : ${FILE}.sha256"
+}
+
+generate_full_html() {
+    init_report_dir
+
+    local TIMESTAMP
+    local FILE
+    local HOST_NAME
+    local REPORT_TIME
+    local OS_NAME
+    local KERNEL_VERSION
+    local HW_CONTENT
+    local SW_CONTENT
+
+    TIMESTAMP=$(date +"%Y%m%d_%H%M%S")
+    FILE="$REPORT_DIR/full_$(hostname)_${TIMESTAMP}.html"
+    HOST_NAME=$(hostname)
+    REPORT_TIME=$(date '+%Y-%m-%d %H:%M:%S')
+    OS_NAME=$(report_os_name)
+    KERNEL_VERSION=$(uname -r)
+    HW_CONTENT=$(hw_full 2>&1 | html_escape)
+    SW_CONTENT=$(sw_full 2>&1 | html_escape)
+
+    cat > "$FILE" <<HTML
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>System Audit Report - Full - ${HOST_NAME}</title>
+    <style>
+        :root {
+            --bg: #050913;
+            --bg-glow: #0f2037;
+            --panel: rgba(10, 16, 29, 0.94);
+            --panel-soft: rgba(20, 33, 52, 0.82);
+            --border: rgba(143, 184, 215, 0.18);
+            --text: #edf5ff;
+            --muted: #9cb1c8;
+            --accent: #f59e0b;
+            --accent-soft: #7dd3fc;
+            --shadow: 0 28px 70px rgba(0, 0, 0, 0.42);
+        }
+
+        * { box-sizing: border-box; }
+
+        body {
+            margin: 0;
+            min-height: 100vh;
+            color: var(--text);
+            background:
+                radial-gradient(circle at top left, rgba(125, 211, 252, 0.16), transparent 26rem),
+                radial-gradient(circle at top right, rgba(245, 158, 11, 0.18), transparent 22rem),
+                linear-gradient(180deg, var(--bg-glow) 0%, var(--bg) 52%, #02050b 100%);
+            font-family: "IBM Plex Sans", "Aptos", "Trebuchet MS", sans-serif;
+        }
+
+        .page {
+            max-width: 1180px;
+            margin: 0 auto;
+            padding: 40px 20px 64px;
+        }
+
+        .hero,
+        .panel {
+            border: 1px solid var(--border);
+            border-radius: 24px;
+            background: var(--panel);
+            box-shadow: var(--shadow);
+        }
+
+        .hero {
+            padding: 32px;
+        }
+
+        .eyebrow {
+            display: inline-flex;
+            align-items: center;
+            gap: 10px;
+            padding: 6px 12px;
+            border-radius: 999px;
+            background: rgba(245, 158, 11, 0.12);
+            color: var(--accent);
+            font-family: "IBM Plex Mono", "Fira Code", "Courier New", monospace;
+            font-size: 0.78rem;
+            letter-spacing: 0.12em;
+            text-transform: uppercase;
+        }
+
+        h1 {
+            margin: 16px 0 10px;
+            font-size: clamp(2rem, 4vw, 3.4rem);
+            line-height: 1.05;
+        }
+
+        .subhead {
+            margin: 0;
+            max-width: 56rem;
+            color: var(--muted);
+            font-size: 1rem;
+            line-height: 1.7;
+        }
+
+        .meta-grid,
+        .content-grid {
+            display: grid;
+            gap: 16px;
+            margin-top: 24px;
+        }
+
+        .meta-grid {
+            grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+        }
+
+        .content-grid {
+            grid-template-columns: 1fr;
+        }
+
+        .meta-card {
+            padding: 16px 18px;
+            border-radius: 18px;
+            border: 1px solid var(--border);
+            background: var(--panel-soft);
+        }
+
+        .meta-card .label {
+            color: var(--muted);
+            font-size: 0.78rem;
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
+        }
+
+        .meta-card .value {
+            margin-top: 8px;
+            font-family: "IBM Plex Mono", "Fira Code", "Courier New", monospace;
+            font-size: 0.96rem;
+        }
+
+        .panel {
+            padding: 24px;
+        }
+
+        .panel h2 {
+            margin: 0 0 16px;
+            color: var(--accent-soft);
+            font-size: 1.05rem;
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
+        }
+
+        pre {
+            margin: 0;
+            font-family: "IBM Plex Mono", "Fira Code", "Courier New", monospace;
+            font-size: 0.92rem;
+            line-height: 1.6;
+            white-space: pre-wrap;
+            word-break: break-word;
+            color: var(--text);
+        }
+
+        footer {
+            margin-top: 20px;
+            text-align: right;
+            color: var(--muted);
+            font-size: 0.88rem;
+        }
+
+        @media (max-width: 720px) {
+            .page {
+                padding: 24px 14px 40px;
+            }
+
+            .hero,
+            .panel {
+                border-radius: 20px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <main class="page">
+        <section class="hero">
+            <span class="eyebrow">sys_audit full report</span>
+            <h1>Linux System Audit</h1>
+            <p class="subhead">
+                A detailed host review focused on actionable system inventory, health,
+                services, and network exposure without overwhelming the report with raw dumps.
+            </p>
+            <div class="meta-grid">
+                <div class="meta-card">
+                    <div class="label">Hostname</div>
+                    <div class="value">${HOST_NAME}</div>
+                </div>
+                <div class="meta-card">
+                    <div class="label">Generated</div>
+                    <div class="value">${REPORT_TIME}</div>
+                </div>
+                <div class="meta-card">
+                    <div class="label">Operating System</div>
+                    <div class="value">${OS_NAME}</div>
+                </div>
+                <div class="meta-card">
+                    <div class="label">Kernel</div>
+                    <div class="value">${KERNEL_VERSION}</div>
+                </div>
+            </div>
+        </section>
+
+        <section class="content-grid">
+            <article class="panel">
+                <h2>Hardware Audit</h2>
+                <pre>${HW_CONTENT}</pre>
+            </article>
+            <article class="panel">
+                <h2>Software Audit</h2>
+                <pre>${SW_CONTENT}</pre>
+            </article>
+        </section>
+
+        <footer>Generated by sys_audit v1.0</footer>
+    </main>
+</body>
+</html>
+HTML
+
+    update_latest_symlink "$FILE" "$REPORT_DIR/latest_full.html"
+    create_report_hash "$FILE"
+
+    echo "[+] Full HTML report   : $FILE"
+    echo "[+] Integrity hash     : ${FILE}.sha256"
+}
+
+# This last part checks and compares finished reports.
+# it reuses the same path resolver as the send features,
+# so the tools also work with latest_* symbolic links.
+verify_report() {
+    local INPUT_PATH=$1
+    local FILE
+    local HASH_FILE
+
+    if [ -z "$INPUT_PATH" ]; then
+        echo "[!] Usage: verify_report <report_file>"
+        return 1
+    fi
+
+    FILE=$(resolve_report_file "$INPUT_PATH") || {
+        echo "[!] Report file not found: $INPUT_PATH"
+        return 1
+    }
+
+    HASH_FILE="${FILE}.sha256"
+    if [ ! -f "$HASH_FILE" ]; then
+        echo "[!] No hash file found for: $FILE"
+        return 1
+    fi
+
+    if (
+        cd "$(dirname "$FILE")" 2>/dev/null || exit 1
+        sha256sum -c "$(basename "$HASH_FILE")" >/dev/null 2>&1
+    ); then
+        echo "[+] Integrity OK: $FILE"
+    else
+        echo "[!] INTEGRITY FAILURE: $FILE may have been tampered with!"
+        return 1
+    fi
+}
+
+compare_reports() {
+    local INPUT_FILE1=$1
+    local INPUT_FILE2=$2
+    local FILE1
+    local FILE2
+
+    if [ -z "$INPUT_FILE1" ] || [ -z "$INPUT_FILE2" ]; then
+        echo "[!] Usage: compare_reports <report1> <report2>"
+        return 1
+    fi
+
+    FILE1=$(resolve_report_file "$INPUT_FILE1") || {
+        echo "[!] Report file not found: $INPUT_FILE1"
+        return 1
+    }
+
+    FILE2=$(resolve_report_file "$INPUT_FILE2") || {
+        echo "[!] Report file not found: $INPUT_FILE2"
+        return 1
+    }
+
+    echo "=== REPORT COMPARISON ==="
+    echo "File 1: $FILE1"
+    echo "File 2: $FILE2"
+    echo "--- Differences ---"
+
+    if ! command -v diff >/dev/null 2>&1; then
+        echo "[!] diff is not available"
+        return 1
+    fi
+
+    diff -u "$FILE1" "$FILE2"
+    case $? in
+        0) echo "[i] No differences found" ;;
+        1) ;;
+        *) echo "[!] Could not compare the selected reports"; return 1 ;;
+    esac
+}

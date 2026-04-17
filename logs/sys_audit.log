@@ -1,0 +1,39 @@
+[2026-03-22 23:53:20] [REPORT_FULL] kali : Generated
+[2026-03-22 23:53:48] [REPORT_FULL] kali : Generated
+[2026-03-27 17:58:56] [CRON_SETUP] kali : Daily cron job configured
+[2026-03-27 17:59:33] [REPORT_SHORT] kali : Generated
+[2026-03-27 18:00:08] [EXIT] kali : User exited menu
+[2026-03-27 19:31:37] [REPORT_FULL] kali : Generated
+[2026-03-27 19:37:22] [REPORT_FULL] kali : Generated
+[2026-03-27 19:41:53] [REPORT_FULL] kali : Generated
+[2026-03-27 19:44:10] [REPORT_FULL] kali : Generated
+[2026-03-28 13:53:11] [REPORT_SHORT] kali : Generated
+[2026-03-28 13:53:14] [REPORT_FULL] kali : Generated
+[2026-03-28 13:53:17] [EXIT] kali : User exited menu
+[2026-04-15 10:48:09] [REPORT_ALL] kali : Generated
+[2026-04-16 02:23:29] [REPORT_SHORT] kali : Generated
+[2026-04-16 02:24:05] [REPORT_FULL] kali : Generated
+[2026-04-16 02:24:11] [EXIT] kali : User exited menu
+[2026-04-16 00:43:50] [CRON_START] kali : Automated audit started
+[2026-04-16 00:43:54] [CRON_DONE] kali : Automated audit completed
+[2026-04-16 00:44:40] [CRON_START] kali : Automated audit started
+[2026-04-16 00:44:44] [EMAIL_FAILED] kali : Report: /run/media/kada/New Volume/OS-PROJECT test/sys_audit/reports/short_kali_20260416_004440.txt -> kadaouanouki2007@gmail.com
+[2026-04-16 00:44:45] [CRON_DONE] kali : Automated audit completed
+[2026-04-16 00:46:30] [CRON_START] kali : Automated audit started
+[2026-04-16 00:46:34] [EMAIL_FAILED] kali : Report: /run/media/kada/New Volume/OS-PROJECT test/sys_audit/reports/short_kali_20260416_004630.txt -> kada9anes@gmail.com
+[2026-04-16 00:46:35] [CRON_DONE] kali : Automated audit completed
+[2026-04-17 21:43:53] [CRON_START] kali : Automated audit started
+[2026-04-17 21:43:56] [EMAIL_FAILED] kali : Report: /run/media/kada/New Volume/OS-PROJECT /reports/short_kali_20260417_214353.txt -> kada9anes@gmail.com
+[2026-04-17 21:43:57] [CRON_DONE] kali : Automated audit completed
+[2026-04-17 21:46:34] [CRON_START] kali : Automated audit started
+[2026-04-17 21:46:38] [EMAIL_FAILED] kali : Report: /run/media/kada/New Volume/OS-PROJECT /reports/short_kali_20260417_214634.txt -> kada9anes@gmail.com
+[2026-04-17 21:46:39] [CRON_DONE] kali : Automated audit completed
+[2026-04-17 21:47:33] [REPORT_ALL] kali : Generated
+[2026-04-17 21:47:41] [EMAIL_FAILED] kali : Report: /run/media/kada/New Volume/OS-PROJECT /reports/short_kali_20260417_214729.txt -> kada9anes@gmail.com
+[2026-04-17 21:48:03] [EXIT] kali : User exited menu
+[2026-04-17 21:50:13] [EMAIL_FAILED] kali : Report: /run/media/kada/New Volume/OS-PROJECT /reports/short_kali_20260417_214729.txt -> kada9anes@gmail.com
+[2026-04-17 22:02:54] [CRON_START] kali : Automated audit started
+[2026-04-17 22:02:58] [CRON_DONE] kali : Automated audit completed
+[2026-04-17 22:03:29] [EXIT] kali : User exited menu
+[2026-04-17 22:04:01] [EMAIL_FAILED] kali : Report: /run/media/kada/New Volume/OS-PROJECT /reports/short_kali_20260417_220254.txt -> kada0gmail.com
+[2026-04-17 22:04:05] [EXIT] kali : User exited menu
