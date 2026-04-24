@@ -77,11 +77,38 @@ create_report_hash() {
     ) 2>/dev/null
 }
 
+repair_legacy_report_link() {
+    local link=$1
+    local target
+    local new_path
+
+    [ -L "$link" ] || return 0
+
+    target=$(readlink "$link" 2>/dev/null) || return 0
+
+    case "$target" in
+        ./reports/*)
+            new_path="${link%/*}/${target#./reports/}"
+            [ -f "$new_path" ] && ln -sfn "$new_path" "$link"
+            ;;
+    esac
+}
+
+repair_report_symlinks() {
+    init_report_dir
+    repair_legacy_report_link "$REPORT_DIR/latest_short.txt"
+    repair_legacy_report_link "$REPORT_DIR/latest_full.txt"
+    repair_legacy_report_link "$REPORT_DIR/latest_short.html"
+    repair_legacy_report_link "$REPORT_DIR/latest_full.html"
+}
+
 resolve_report_candidate() {
     local candidate=$1
     local target
 
     [ -n "$candidate" ] || return 1
+
+    [ -L "$candidate" ] && repair_legacy_report_link "$candidate"
 
     if [ -f "$candidate" ]; then
         canonical_existing_path "$candidate"

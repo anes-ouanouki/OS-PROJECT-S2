@@ -54,11 +54,24 @@ load_modules() {
             echo "[!] Missing module: ${module}.sh"
         fi
     done
+}
+
+# This next part normalizes the main folders and loads every module.
+# it keeps the shared paths absolute inside the script,
+# so reports, logs, email, and remote actions use the same locations.
+load_config
+REPORT_DIR=$(project_path "${REPORT_DIR:-reports}")
+LOG_DIR=$(project_path "${LOG_DIR:-logs}")
+load_modules
 
 # Once everything is loaded we prepare the runtime state.
 # it starts the logger and also repairs old latest_* report links,
 # so the project does not keep broken symbolic links around.
 init_logger
+
+if declare -F repair_report_symlinks >/dev/null 2>&1; then
+    repair_report_symlinks
+fi
 
 # This part is just for how things look on screen.
 # it keeps some colors and the banner so the menu looks nicer
