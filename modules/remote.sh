@@ -16,16 +16,8 @@ check_ssh_deps() {
         echo "[!] scp is not installed"
         return 1
     fi
+}
 
-    return 0
-}
-resolve_remote_report_file() {
-    if type resolve_report_file >/dev/null 2>&1; then
-        resolve_report_file "$1"
-    elif [ -f "$1" ]; then
-        echo "$1"
-    fi
-}
 quote_remote_path() {
     echo "$1" | sed "s/'/'\\\\''/g"
 }
@@ -35,36 +27,35 @@ quote_remote_path() {
 # so the remote side receives both the file and its integrity check.
 remote_send_report() {
     local file
-    file=$(resolve_remote_report_file "$1") || {
+    local user=${2:-$REMOTE_USER}
+    local host=${3:-$REMOTE_HOST}
+    local dir=${4:-$REMOTE_REPORT_DIR}
+    local hash
+    local qdir
+
+    file=$(resolve_report_file "$1") || {
         echo "[!] Invalid report file"
         return 1
     }
 
-    local user=${2:-$REMOTE_USER}
-    local host=${3:-$REMOTE_HOST}
-    local dir=${4:-$REMOTE_REPORT_DIR}
-
-    [ -z "$user" ] || [ -z "$host" ] || [ -z "$dir" ] && {
+    [ -n "$user" ] && [ -n "$host" ] && [ -n "$dir" ] || {
         echo "[!] Missing remote config"
         return 1
     }
 
     check_ssh_deps || return 1
 
-    local hash="${file}.sha256"
-    local qdir
+    hash="${file}.sha256"
     qdir=$(quote_remote_path "$dir")
 
-    echo "[*] Sending → $user@$host:$dir"
+    echo "[*] Sending to $user@$host:$dir"
 
-    # this part will create directory
     ssh -o ConnectTimeout=10 -o StrictHostKeyChecking=accept-new \
         "$user@$host" "mkdir -p -- '$qdir'" || {
         echo "[!] Remote mkdir failed"
         return 1
     }
 
-    # this part will send the main file
     scp -p -o ConnectTimeout=10 \
         "$file" "$user@$host:'$qdir/$(basename "$file")'" || {
         echo "[!] File transfer failed"
@@ -80,7 +71,7 @@ remote_send_report() {
         }
     fi
 
-    echo "[+] Done"
+    echo "[+] Transfer complete"
 }
 
 
@@ -91,7 +82,7 @@ remote_pull_audit() {
     local user=${1:-$REMOTE_USER}
     local host=${2:-$REMOTE_HOST}
 
-    [ -z "$user" ] || [ -z "$host" ] && {
+    [ -n "$user" ] && [ -n "$host" ] || {
         echo "[!] Missing remote config"
         return 1
     }
@@ -129,7 +120,7 @@ echo "Users"
 who 2>/dev/null || echo "(none)"
 EOF
 
-    if ssh_exit=$?; [ $ssh_exit -ne 0 ]; then
+    if [ $? -ne 0 ]; then
         echo "[!] SSH failed"
         return 1
     fi
@@ -147,13 +138,13 @@ setup_ssh_keys() {
     local host=${2:-$REMOTE_HOST}
     local key="$HOME/.ssh/id_ed25519"
 
-    [ -z "$user" ] || [ -z "$host" ] && {
+    [ -n "$user" ] && [ -n "$host" ] || {
         echo "[!] Missing remote config"
         return 1
     }
 
-    command -v ssh-copy-id >/dev/null || {
-        echo "[!] ssh-copy-id not installed"
+    command -v ssh-copy-id >/dev/null 2>&1 || {
+        echo "[!] ssh-copy-id is not installed"
         return 1
     }
 
@@ -163,10 +154,10 @@ setup_ssh_keys() {
         ssh-keygen -t ed25519 -C "audit@$(hostname)" -f "$key" -N "" || return 1
     fi
 
-    echo "[*] Installing key → $user@$host"
+    echo "[*] Installing key on $user@$host"
 
     if ssh-copy-id -i "$key.pub" "$user@$host"; then
-        echo "[+] SSH auth ready (no password needed)"
+        echo "[+] SSH authentication ready"
     else
         echo "[!] Failed. Manual fallback:"
         echo "cat $key.pub"
@@ -184,16 +175,15 @@ remote_watch() {
     local host=${2:-$REMOTE_HOST}
     local interval=${3:-5}
 
-    [ -z "$user" ] || [ -z "$host" ] && {
+    [ -n "$user" ] && [ -n "$host" ] || {
         echo "[!] Missing remote config"
         return 1
     }
 
     check_ssh_deps || return 1
 
-    echo "[*] Watching $user@$host (every ${interval}s)"
+    echo "[*] Watching $user@$host every ${interval}s"
     echo "Press Ctrl+C to stop"
-    echo
 
     while :; do
         clear

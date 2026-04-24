@@ -8,9 +8,12 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # This first part is the setup side.
 # it finds where the project is, loads the config file,
 # and also brings in all the module files the script needs.
-if [ -f "$SCRIPT_DIR/config.cfg" ]; then
-    source "$SCRIPT_DIR/config.cfg"
-else
+load_config() {
+    if [ -f "$SCRIPT_DIR/config.cfg" ]; then
+        source "$SCRIPT_DIR/config.cfg"
+        return
+    fi
+
     echo "[!] config.cfg not found, using defaults"
     REPORT_DIR="$SCRIPT_DIR/reports"
     LOG_DIR="$SCRIPT_DIR/logs"
@@ -22,49 +25,40 @@ else
     CPU_ALERT_THRESHOLD=80
     DISK_ALERT_THRESHOLD=90
     RAM_ALERT_THRESHOLD=85
-    MAX_PROCESS_DISPLAY=20
-fi
+}
 
 # This helper makes config paths safe to use from anywhere.
 # it turns relative paths into project paths,
 # so menu actions and cron jobs still find the right files.
 project_path() {
-    local PATH_VALUE=$1
+    local value=$1
 
-    if [ -z "$PATH_VALUE" ]; then
-        return 1
-    fi
+    [ -n "$value" ] || return 1
 
-    case "$PATH_VALUE" in
-        /*) printf '%s\n' "$PATH_VALUE" ;;
-        ./*) printf '%s\n' "$SCRIPT_DIR/${PATH_VALUE#./}" ;;
-        *) printf '%s\n' "$SCRIPT_DIR/$PATH_VALUE" ;;
+    case "$value" in
+        /*) printf '%s\n' "$value" ;;
+        ./*) printf '%s\n' "$SCRIPT_DIR/${value#./}" ;;
+        *) printf '%s\n' "$SCRIPT_DIR/$value" ;;
     esac
 }
 
-# This next part normalizes the main folders and loads every module.
-# it keeps the shared paths absolute inside the script,
-# so reports, logs, email, and remote actions use the same locations.
-REPORT_DIR=$(project_path "${REPORT_DIR:-reports}")
-LOG_DIR=$(project_path "${LOG_DIR:-logs}")
+load_modules() {
+    local module
+    local module_path
 
-for MODULE in hw_audit sw_audit report email remote alerts logger; do
-    MODULE_PATH="$SCRIPT_DIR/modules/${MODULE}.sh"
-    if [ -f "$MODULE_PATH" ]; then
-        source "$MODULE_PATH"
-    else
-        echo "[!] Missing module: ${MODULE}.sh"
-    fi
-done
+    for module in hw_audit sw_audit report email remote alerts logger; do
+        module_path="$SCRIPT_DIR/modules/${module}.sh"
+        if [ -f "$module_path" ]; then
+            source "$module_path"
+        else
+            echo "[!] Missing module: ${module}.sh"
+        fi
+    done
 
 # Once everything is loaded we prepare the runtime state.
 # it starts the logger and also repairs old latest_* report links,
 # so the project does not keep broken symbolic links around.
 init_logger
-
-if declare -F repair_report_symlinks >/dev/null 2>&1; then
-    repair_report_symlinks
-fi
 
 # This part is just for how things look on screen.
 # it keeps some colors and the banner so the menu looks nicer
@@ -124,7 +118,7 @@ run_auto() {
     check_alerts
 
     log_event "CRON_DONE" "Automated audit completed"
-    echo "[+] Auto audit done. Reports in: $REPORT_DIR"
+    echo "[+] Reports saved in: $REPORT_DIR"
 }
 
 main_menu() {
@@ -168,7 +162,7 @@ main_menu() {
                 read -rp "Press Enter to continue..."
                 ;;
             3)
-                section "GENERATING ALL REPORTS"
+                section "ALL REPORTS"
                 generate_short_txt
                 generate_short_html
                 generate_full_txt
@@ -219,12 +213,12 @@ main_menu() {
                 configure_email
                 read -rp "Press Enter to continue..."
                 ;;
-           10)
+            10)
                 section "AUDIT LOGS"
                 show_log 50
                 read -rp "Press Enter to continue..."
                 ;;
-           11)
+            11)
                 section "CRON JOB SETUP"
                 setup_cron
                 read -rp "Press Enter to continue..."
@@ -354,6 +348,7 @@ case "${1:-}" in
         echo "  --auto     : Run full automated audit (used by cron)"
         echo "  --short    : Generate short report only"
         echo "  --full     : Generate full report only"
+        echo "  --help     : Show this help message"
         ;;
     *)
         main_menu

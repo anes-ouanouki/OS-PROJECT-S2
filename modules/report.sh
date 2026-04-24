@@ -7,9 +7,10 @@
 # it keeps the report name and folder helpers together,
 # so text and html generation can reuse the same setup.
 report_os_name() {
-    local OS_NAME
-    OS_NAME=$(awk -F= '/^PRETTY_NAME=/{gsub(/"/, "", $2); print $2; exit}' /etc/os-release 2>/dev/null)
-    printf '%s\n' "${OS_NAME:-$(uname -s)}"
+    local os_name
+
+    os_name=$(awk -F= '/^PRETTY_NAME=/{gsub(/"/, "", $2); print $2; exit}' /etc/os-release 2>/dev/null)
+    printf '%s\n' "${os_name:-$(uname -s)}"
 }
 
 normalize_report_dir() {
@@ -48,108 +49,73 @@ init_report_dir() {
 # it keeps the portable hash files and stable latest_* names updated,
 # so sending, verifying, and opening reports stay easier.
 canonical_existing_path() {
-    local INPUT_PATH=$1
+    local input_path=$1
 
     if command -v realpath >/dev/null 2>&1; then
-        realpath -e "$INPUT_PATH" 2>/dev/null && return 0
+        realpath -e "$input_path" 2>/dev/null && return 0
     fi
 
     (
-        cd "$(dirname "$INPUT_PATH")" 2>/dev/null || exit 1
-        printf '%s/%s\n' "$PWD" "$(basename "$INPUT_PATH")"
+        cd "$(dirname "$input_path")" 2>/dev/null || exit 1
+        printf '%s/%s\n' "$PWD" "$(basename "$input_path")"
     )
 }
 
 update_latest_symlink() {
-    local FILE=$1
-    local LINK_PATH=$2
+    local file=$1
+    local link_path=$2
 
-    ln -sfn "$(basename "$FILE")" "$LINK_PATH" 2>/dev/null
+    ln -sfn "$(basename "$file")" "$link_path" 2>/dev/null
 }
 
 create_report_hash() {
-    local FILE=$1
+    local file=$1
 
     (
-        cd "$(dirname "$FILE")" 2>/dev/null || exit 1
-        sha256sum "$(basename "$FILE")" > "$(basename "$FILE").sha256"
+        cd "$(dirname "$file")" 2>/dev/null || exit 1
+        sha256sum "$(basename "$file")" > "$(basename "$file").sha256"
     ) 2>/dev/null
 }
-repair_legacy_report_link() {
-    local link=$1
 
-    # not a symlink → nothing to do
-    [ -L "$link" ] || return 0
-
-    local target
-    target=$(readlink "$link" 2>/dev/null) || return 0
-
-    # only care about legacy format
-    case "$target" in
-        ./reports/*)
-            local new_path="${link%/*}/${target#./reports/}"
-
-            # if file exists, repoint symlink to new location
-            [ -f "$new_path" ] && ln -sfn "$new_path" "$link"
-            ;;
-    esac
-}
-
-# This part resolves report file names before they are reused elsewhere.
-# it repairs old link targets and expands simple input names,
-# so email, remote copy, compare, and verify all use real files.
-repair_report_symlinks() {
-    init_report_dir
-    repair_legacy_report_link "$REPORT_DIR/latest_short.txt"
-    repair_legacy_report_link "$REPORT_DIR/latest_full.txt"
-    repair_legacy_report_link "$REPORT_DIR/latest_short.html"
-    repair_legacy_report_link "$REPORT_DIR/latest_full.html"
-}
 resolve_report_candidate() {
-    local c=$1
-    [ -n "$c" ] || return 1
+    local candidate=$1
+    local target
 
-    # if symlink, attempt repair first
-    [ -L "$c" ] && repair_legacy_report_link "$c"
+    [ -n "$candidate" ] || return 1
 
-    # direct file hit
-    if [ -f "$c" ]; then
-        canonical_existing_path "$c"
+    if [ -f "$candidate" ]; then
+        canonical_existing_path "$candidate"
         return
     fi
 
-    # symlink resolution fallback
-    if [ -L "$c" ]; then
-        local t
-        t=$(readlink "$c" 2>/dev/null) || return 1
-
-        case "$t" in
+    if [ -L "$candidate" ]; then
+        target=$(readlink "$candidate" 2>/dev/null) || return 1
+        case "$target" in
             /*) ;;
-            *) t="$(dirname "$c")/$t" ;;
+            *) target="$(dirname "$candidate")/$target" ;;
         esac
 
-        [ -f "$t" ] && canonical_existing_path "$t" && return
+        [ -f "$target" ] && canonical_existing_path "$target" && return
     fi
 
     return 1
 }
 
 resolve_report_file() {
-    local INPUT_PATH=$1
+    local input_path=$1
 
-    [ -n "$INPUT_PATH" ] || return 1
-
+    [ -n "$input_path" ] || return 1
     init_report_dir
 
-    resolve_report_candidate "$INPUT_PATH" && return 0
+    resolve_report_candidate "$input_path" && return 0
 
-    if [[ "$INPUT_PATH" != /* ]]; then
-        if [[ "$INPUT_PATH" != */* ]]; then
-            resolve_report_candidate "$REPORT_DIR/$INPUT_PATH" && return 0
+    if [[ "$input_path" != /* ]]; then
+        if [[ "$input_path" != */* ]]; then
+            resolve_report_candidate "$REPORT_DIR/$input_path" && return 0
         fi
 
         if [ -n "${SCRIPT_DIR:-}" ]; then
-            resolve_report_candidate "$SCRIPT_DIR/$INPUT_PATH" && return 0
+            resolve_report_candidate "$SCRIPT_DIR/$input_path" && return 0
         fi
     fi
 

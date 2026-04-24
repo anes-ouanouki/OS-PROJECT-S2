@@ -9,6 +9,7 @@
 primary_interface() {
     ip route get 1.1.1.1 2>/dev/null | awk '{for (i=1; i<=NF; i++) if ($i=="dev") {print $(i+1); exit}}'
 }
+
 primary_ipv4() {
     ip route get 1.1.1.1 2>/dev/null | awk '{for (i=1; i<=NF; i++) if ($i=="src") {print $(i+1); exit}}'
 }
@@ -34,6 +35,7 @@ get_cpu() {
 
     echo "Load Avg     : $(cut -d ' ' -f1-3 /proc/loadavg)"
 }
+
 get_gpu() {
     echo "=== GPU ==="
     if command -v lspci >/dev/null 2>&1; then
@@ -42,6 +44,7 @@ get_gpu() {
         echo "[!] lspci not available"
     fi
 }
+
 get_ram() {
     echo "=== MEMORY ==="
     free -h | awk 'NR==1 || /^Mem:/ || /^Swap:/'
@@ -55,37 +58,36 @@ get_disk() {
     echo "-- Mounted Filesystems --"
     df -hT -x tmpfs -x devtmpfs -x squashfs -x efivarfs 2>/dev/null
 }
+
 get_network() {
+    local primary_iface primary_ip gateway
+    local iface
+    local name
+    local mac
+
     echo "=== NETWORK ==="
 
-    
-    local PRIMARY_IFACE PRIMARY_IP GATEWAY
-    PRIMARY_IFACE=$(primary_interface 2>/dev/null || echo "N/A")
-    PRIMARY_IP=$(primary_ipv4 2>/dev/null || echo "N/A")
-    GATEWAY=$(default_gateway 2>/dev/null || echo "N/A")
+    primary_iface=$(primary_interface 2>/dev/null || echo "N/A")
+    primary_ip=$(primary_ipv4 2>/dev/null || echo "N/A")
+    gateway=$(default_gateway 2>/dev/null || echo "N/A")
 
-    echo "Primary Interface : $PRIMARY_IFACE"
-    echo "Primary IPv4      : $PRIMARY_IP"
-    echo "Default Gateway   : $GATEWAY"
-
-    echo ""
+    echo "Primary Interface : $primary_iface"
+    echo "Primary IPv4      : $primary_ip"
+    echo "Default Gateway   : $gateway"
+    echo
     echo "-- Active Interfaces --"
-    ip -o -4 addr show up scope global 2>/dev/null \
-        | awk '{print $2 ":", $4}' || echo "N/A"
-
-    echo ""
+    ip -o -4 addr show up scope global 2>/dev/null | awk '{print $2 ":", $4}' || echo "N/A"
+    echo
     echo "-- MAC Addresses --"
 
     for iface in /sys/class/net/*; do
         name=$(basename "$iface")
         mac=$(cat "$iface/address" 2>/dev/null)
-
-        # skip invalid entries
-        [ -z "$mac" ] && continue 
-
+        [ -n "$mac" ] || continue
         printf "%-18s %s\n" "$name:" "$mac"
     done
 }
+
 get_motherboard() {
     echo "=== MOTHERBOARD / BIOS ==="
 
@@ -101,12 +103,13 @@ get_motherboard() {
 }
 
 get_usb() {
+    local usb_count
+
     echo "=== USB DEVICES ==="
     if command -v lsusb >/dev/null 2>&1; then
-        local USB_COUNT
-        USB_COUNT=$(lsusb 2>/dev/null | wc -l)
-        echo "Detected Devices     : ${USB_COUNT:-0}"
-        echo ""
+        usb_count=$(lsusb 2>/dev/null | wc -l)
+        echo "Detected Devices     : ${usb_count:-0}"
+        echo
         lsusb 2>/dev/null | head -10
     else
         echo "[!] lsusb not available"
@@ -118,34 +121,32 @@ get_usb() {
 # it builds the short summary and the full hardware report,
 # so report.sh can call one simple function for each mode.
 hw_summary() {
-    local MEMORY_TOTAL
-    local MEMORY_USED
-    local MEMORY_AVAILABLE
-    local ROOT_USAGE
-    local GPU_NAME
-    local PRIMARY_IFACE
-    local PRIMARY_IP_ADDR
+    local memory_total
+    local memory_used
+    local memory_available
+    local root_usage
+    local gpu_name
+    local primary_iface
+    local primary_ip_addr
 
-    MEMORY_TOTAL=$(free -h | awk '/Mem:/ {print $2}')
-    MEMORY_USED=$(free -h | awk '/Mem:/ {print $3}')
-    MEMORY_AVAILABLE=$(free -h | awk '/Mem:/ {print $7}')
-
-    ROOT_USAGE=$(df -h / | awk 'NR==2 {print $3 "/" $2 " (" $5 " used)"}')
-
-    GPU_NAME=$(lspci 2>/dev/null | grep -i "vga\|display" | cut -d: -f3 | sed 's/^ *//' | head -1)
-
-    PRIMARY_IFACE=$(primary_interface)
-    PRIMARY_IP_ADDR=$(primary_ipv4)
+    memory_total=$(free -h | awk '/Mem:/ {print $2}')
+    memory_used=$(free -h | awk '/Mem:/ {print $3}')
+    memory_available=$(free -h | awk '/Mem:/ {print $7}')
+    root_usage=$(df -h / | awk 'NR==2 {print $3 "/" $2 " (" $5 " used)"}')
+    gpu_name=$(lspci 2>/dev/null | grep -iE "vga|display" | cut -d: -f3 | sed 's/^ *//' | head -1)
+    primary_iface=$(primary_interface)
+    primary_ip_addr=$(primary_ipv4)
 
     echo "=== HARDWARE SUMMARY ==="
     echo "CPU        : $(lscpu 2>/dev/null | awk -F: '/Model name/ {print $2; exit}' || echo N/A)"
     echo "Cores      : $(nproc 2>/dev/null || echo N/A)"
     echo "Load Avg   : $(cut -d' ' -f1-3 /proc/loadavg 2>/dev/null || echo N/A)"
-    echo "Memory     : ${MEMORY_USED:-N/A} used / ${MEMORY_TOTAL:-N/A} total / ${MEMORY_AVAILABLE:-N/A} available"
-    echo "Root Disk  : ${ROOT_USAGE:-N/A}"
-    echo "GPU        : ${GPU_NAME:-N/A}"
-    echo "Network    : ${PRIMARY_IFACE:-N/A} ${PRIMARY_IP_ADDR:-N/A}"
+    echo "Memory     : ${memory_used:-N/A} used / ${memory_total:-N/A} total / ${memory_available:-N/A} available"
+    echo "Root Disk  : ${root_usage:-N/A}"
+    echo "GPU        : ${gpu_name:-N/A}"
+    echo "Network    : ${primary_iface:-N/A} ${primary_ip_addr:-N/A}"
 }
+
 hw_full() {
     get_cpu
     echo ""

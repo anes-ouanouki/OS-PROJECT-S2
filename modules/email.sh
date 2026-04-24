@@ -8,38 +8,21 @@
 # so the send step fails early with a clear message when needed.
 check_email_deps() {
     if ! command -v msmtp >/dev/null 2>&1; then
-        echo "[!] msmtp is not installed."
+        echo "[!] msmtp is not installed"
         echo "[i] Install with: sudo apt install msmtp msmtp-mta"
         return 1
     fi
 
     if ! command -v base64 >/dev/null 2>&1; then
-        echo "[!] base64 is not available."
+        echo "[!] base64 is not available"
         return 1
     fi
-
-    return 0
 }
-
-# This helper resolves report paths before we try to attach anything.
-# it uses the report module when available,
-# so symbolic links and relative names still work correctly.
-
-resolve_email_report_file() {
-    if declare -F resolve_report_file >/dev/null 2>&1; then
-        resolve_report_file "$1"
-        return $?
-    fi
-
-    [ -f "$1" ] && printf '%s\n' "$1" #doesnt resolve, just checks if the file exists and returns the path
-}
-
-
 # This helper chooses the attachment content type.
 # it keeps text and html reports readable to mail clients,
 # so the receiver sees the right file type automatically.
 attachment_mime_type() {
-    local file_path="$1"
+    local file_path=$1
 
     [ -f "$file_path" ] || return 1
 
@@ -50,109 +33,102 @@ attachment_mime_type() {
     fi
 }
 
+send_report() {
+    local report_input=$1
+    local recipient=${2:-$RECIPIENT_EMAIL}
+    local report_type=${3:-"Audit Report"}
+    local report_file
+    local hash_file
+    local report_name
+    local hash_name
+    local subject
+    local body
+    local boundary
+    local report_mime
+    local hash_mime
 
-# This main function builds the email and sends the attachments.
-# it attaches the report file and also the hash file when present,
-# so the receiver can open the report and verify it later.
-
-send_report(){
-    local REPORT_INPUT=$1
-    local RECIPIENT=${2:-$RECIPIENT_EMAIL}
-    local REPORT_TYPE=${3:-"Audit Report"}
-    local REPORT_FILE
-    local HASH_FILE
-    local REPORT_NAME
-    local HASH_NAME
-    local SUBJECT
-    local BODY
-    local BOUNDARY
-    local REPORT_MIME
-    local HASH_MIME
-
-    if [ -z "$REPORT_INPUT" ]; then
+    if [ -z "$report_input" ]; then
         echo "[!] No report file specified"
         return 1
     fi
 
-    REPORT_FILE=$(resolve_email_report_file "$REPORT_INPUT") || {
-        echo "[!] Report file not found: $REPORT_INPUT"
+    report_file=$(resolve_report_file "$report_input") || {
+        echo "[!] Report file not found: $report_input"
         return 1
     }
 
-    if [ -z "$RECIPIENT" ]; then
+    if [ -z "$recipient" ]; then
         echo "[!] No recipient email configured"
         return 1
     fi
 
     check_email_deps || return 1
 
-    HASH_FILE="${REPORT_FILE}.sha256"
-    REPORT_NAME=$(basename "$REPORT_FILE")
-    HASH_NAME=$(basename "$HASH_FILE")
-    REPORT_MIME=$(attachment_mime_type "$REPORT_FILE")
-    HASH_MIME=$(attachment_mime_type "$HASH_FILE")
-    SUBJECT="[sys_audit] ${REPORT_TYPE} - $(hostname) - $(date '+%Y-%m-%d %H:%M')"
+    hash_file="${report_file}.sha256"
+    report_name=$(basename "$report_file")
+    hash_name=$(basename "$hash_file")
+    report_mime=$(attachment_mime_type "$report_file")
+    if [ -f "$hash_file" ]; then
+        hash_mime=$(attachment_mime_type "$hash_file")
+    fi
 
-    BODY=$(cat <<EOF
-Automated system audit report attached.
+    subject="[sys_audit] ${report_type} - $(hostname) - $(date '+%Y-%m-%d %H:%M')"
+    body=$(cat <<EOF
+System audit report attached.
 
 Host   : $(hostname)
 Date   : $(date '+%Y-%m-%d %H:%M:%S')
-Type   : $REPORT_TYPE
-Report : $REPORT_NAME
+Type   : $report_type
+Report : $report_name
 EOF
 )
+    boundary="====sys_audit_$(date +%s)_$$===="
 
-    BOUNDARY="====sys_audit_$(date +%s)_$$===="
-
-    echo "[*] Sending email to: $RECIPIENT"
-    echo "[*] Resolved report   : $REPORT_FILE"
-
+    echo "[*] Sending email to: $recipient"
+    echo "[*] Report: $report_file"
+    
     # This block builds a multipart email with real attachments.
     # it keeps the mail body short and puts the files in attachments,
     # so long reports do not flood the message content itself.
     {
-        echo "To: $RECIPIENT"
-        echo "Subject: $SUBJECT"
+        echo "To: $recipient"
+        echo "Subject: $subject"
         echo "MIME-Version: 1.0"
-        echo "Content-Type: multipart/mixed; boundary=\"$BOUNDARY\""
-        echo ""
-        echo "--$BOUNDARY"
+        echo "Content-Type: multipart/mixed; boundary=\"$boundary\""
+        echo
+        echo "--$boundary"
         echo "Content-Type: text/plain; charset=UTF-8"
         echo "Content-Transfer-Encoding: 8bit"
-        echo ""
-        printf '%s\n' "$BODY"
-        echo ""
-        echo "--$BOUNDARY"
-        echo "Content-Type: $REPORT_MIME; name=\"$REPORT_NAME\""
+        echo
+        printf '%s\n' "$body"
+        echo
+        echo "--$boundary"
+        echo "Content-Type: $report_mime; name=\"$report_name\""
         echo "Content-Transfer-Encoding: base64"
-        echo "Content-Disposition: attachment; filename=\"$REPORT_NAME\""
-        echo ""
-        base64 -w 76 "$REPORT_FILE"
+        echo "Content-Disposition: attachment; filename=\"$report_name\""
+        echo
+        base64 -w 76 "$report_file"
 
-        if [ -f "$HASH_FILE" ]; then
-            echo ""
-            echo "--$BOUNDARY"
-            echo "Content-Type: $HASH_MIME; name=\"$HASH_NAME\""
+        if [ -f "$hash_file" ]; then
+            echo
+            echo "--$boundary"
+            echo "Content-Type: $hash_mime; name=\"$hash_name\""
             echo "Content-Transfer-Encoding: base64"
-            echo "Content-Disposition: attachment; filename=\"$HASH_NAME\""
-            echo ""
-            base64 -w 76 "$HASH_FILE"
+            echo "Content-Disposition: attachment; filename=\"$hash_name\""
+            echo
+            base64 -w 76 "$hash_file"
         fi
 
-        echo ""
-        echo "--$BOUNDARY--"
-    } | msmtp --account="$MSMTP_ACCOUNT" "$RECIPIENT" 2>&1
+        echo
+        echo "--$boundary--"
+    } | msmtp --account="$MSMTP_ACCOUNT" "$recipient" >/dev/null 2>&1
+
     if [ $? -eq 0 ]; then
-        echo "[+] Email sent successfully to: $RECIPIENT"
-        echo "[+] Attached report       : $REPORT_NAME"
-        if [ -f "$HASH_FILE" ]; then
-            echo "[+] Attached hash        : $HASH_NAME"
-        fi
-        log_event "EMAIL_SENT" "Report: $REPORT_FILE -> $RECIPIENT"
+        echo "[+] Email sent to: $recipient"
+        log_event "EMAIL_SENT" "Report: $report_file -> $recipient"
     else
         echo "[!] Email sending failed"
-        log_event "EMAIL_FAILED" "Report: $REPORT_FILE -> $RECIPIENT"
+        log_event "EMAIL_FAILED" "Report: $report_file -> $recipient"
         return 1
     fi
 }
@@ -163,17 +139,14 @@ EOF
 # so the user can prepare email delivery without opening the script.
 configure_email() {
     echo "============================================================"
-    echo "  EMAIL CONFIGURATION GUIDE (msmtp + Gmail)"
+    echo "EMAIL CONFIGURATION GUIDE"
     echo "============================================================"
-    echo ""
+    echo
     echo "1. Install msmtp:"
     echo "   sudo apt install msmtp msmtp-mta"
-    echo ""
-    echo "2. Create config file: ~/.msmtprc"
-    echo "   (or /etc/msmtprc for system-wide)"
-    echo ""
-    echo "3. Add the following content:"
-    echo ""
+    echo
+    echo "2. Create ~/.msmtprc and add:"
+    echo
     cat <<'CONF'
 # ~/.msmtprc
 defaults

@@ -7,10 +7,10 @@
 # it answers the common questions like os name and package count,
 # so the report sections can stay shorter and easier to follow.
 os_name() {
-    local NAME
+    local name
 
-    NAME=$(awk -F= '/^PRETTY_NAME=/{gsub(/"/, "", $2); print $2; exit}' /etc/os-release 2>/dev/null)
-    printf '%s\n' "${NAME:-$(uname -s)}"
+    name=$(awk -F= '/^PRETTY_NAME=/{gsub(/"/, "", $2); print $2; exit}' /etc/os-release 2>/dev/null)
+    printf '%s\n' "${name:-$(uname -s)}"
 }
 
 package_manager_name() {
@@ -24,6 +24,7 @@ package_manager_name() {
         echo "unknown"
     fi
 }
+
 installed_package_count() {
     if command -v dpkg >/dev/null 2>&1; then
         dpkg-query -f '${binary:Package}\n' -W 2>/dev/null | wc -l
@@ -62,31 +63,32 @@ get_os() {
     echo "Installed Packages  : $(installed_package_count)"
 }
 
-
 get_packages() {
-    local PKG_MANAGER
-    PKG_MANAGER=$(package_manager_name)
+    local pkg_manager
+    local pkg
+
+    pkg_manager=$(package_manager_name)
 
     echo "=== PACKAGE OVERVIEW ==="
-    echo "Package Manager     : $PKG_MANAGER"
+    echo "Package Manager     : $pkg_manager"
     echo "Installed Packages  : $(installed_package_count)"
-    echo ""
+    echo
     echo "-- Key Tools Snapshot --"
 
-    case "$PKG_MANAGER" in
+    case "$pkg_manager" in
         dpkg)
-            for PKG in openssh-client openssh-server curl git python3 msmtp ufw apache2 nginx docker.io; do
-                dpkg -s "$PKG" >/dev/null 2>&1 && printf "%-18s installed\n" "$PKG"
+            for pkg in openssh-client openssh-server curl git python3 msmtp ufw apache2 nginx docker.io; do
+                dpkg -s "$pkg" >/dev/null 2>&1 && printf "%-18s installed\n" "$pkg"
             done
             ;;
         rpm)
-            for PKG in openssh curl git python3 msmtp firewalld httpd nginx docker; do
-                rpm -q "$PKG" >/dev/null 2>&1 && printf "%-18s installed\n" "$PKG"
+            for pkg in openssh curl git python3 msmtp firewalld httpd nginx docker; do
+                rpm -q "$pkg" >/dev/null 2>&1 && printf "%-18s installed\n" "$pkg"
             done
             ;;
         pacman)
-            for PKG in openssh curl git python msmtp ufw apache nginx docker; do
-                pacman -Q "$PKG" >/dev/null 2>&1 && printf "%-18s installed\n" "$PKG"
+            for pkg in openssh curl git python msmtp ufw apache nginx docker; do
+                pacman -Q "$pkg" >/dev/null 2>&1 && printf "%-18s installed\n" "$pkg"
             done
             ;;
         *)
@@ -111,8 +113,8 @@ get_services() {
     echo "=== RUNNING SERVICES ==="
     if command -v systemctl >/dev/null 2>&1; then
         echo "Total Running        : $(running_service_count)"
-        echo ""
-        systemctl list-units --type=service --state=running --no-pager --no-legend 2>/dev/null | \
+        echo
+        systemctl list-units --type=service --state=running --no-pager --no-legend 2>/dev/null |
             awk 'NR<=15 {printf "%-40s %s\n", $1, $4}'
     elif command -v service >/dev/null 2>&1; then
         service --status-all 2>/dev/null | grep "+" | head -15
@@ -143,14 +145,16 @@ get_firewall() {
 }
 
 get_cron() {
+    local cron_dir
+
     echo "=== SCHEDULED TASKS ==="
     echo "-- Current User Crontab --"
     crontab -l 2>/dev/null || echo "(none)"
-    echo ""
+    echo
     echo "-- System Cron Directories --"
-    for CRON_DIR in /etc/cron.d /etc/cron.daily /etc/cron.weekly /etc/cron.monthly; do
-        if [ -d "$CRON_DIR" ]; then
-            printf "%-18s %s entries\n" "$(basename "$CRON_DIR"):" "$(find "$CRON_DIR" -maxdepth 1 -type f 2>/dev/null | wc -l)"
+    for cron_dir in /etc/cron.d /etc/cron.daily /etc/cron.weekly /etc/cron.monthly; do
+        if [ -d "$cron_dir" ]; then
+            printf "%-18s %s entries\n" "$(basename "$cron_dir"):" "$(find "$cron_dir" -maxdepth 1 -type f 2>/dev/null | wc -l)"
         fi
     done
 }

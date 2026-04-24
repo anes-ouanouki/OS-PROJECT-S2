@@ -10,17 +10,17 @@ This project is a Bash-based system audit tool for Linux. It can generate short 
 
 ```text
 sys_audit/
-|- main.sh                  # Main entry point and interactive menu
+|- main.sh                  # Main entry point and menu
 |- config.cfg               # Paths, email settings, remote settings, thresholds
 |- modules/
 |  |- hw_audit.sh           # Hardware information collection
 |  |- sw_audit.sh           # Software and OS information collection
-|  |- report.sh             # Report generation, hashes, latest_* links
+|  |- report.sh             # Report generation, hashes, latest links
 |  |- email.sh              # Email delivery with attachments
 |  |- remote.sh             # SSH transfer, remote snapshot, live watch
 |  |- alerts.sh             # CPU, RAM, and disk threshold alerts
 |  `- logger.sh             # Shared logging and log rotation
-|- reports/                 # Generated reports and latest_* symbolic links
+|- reports/                 # Generated reports and latest links
 `- logs/                    # Runtime logs
 ```
 
@@ -100,7 +100,6 @@ Main values to update:
 - `RECIPIENT_EMAIL` and `MSMTP_ACCOUNT` for email delivery
 - `REMOTE_USER`, `REMOTE_HOST`, and `REMOTE_REPORT_DIR` for SSH transfer
 - `CPU_ALERT_THRESHOLD`, `RAM_ALERT_THRESHOLD`, and `DISK_ALERT_THRESHOLD` for alerts
-- `MAX_PROCESS_DISPLAY` to control the process list size in reports
 
 ---
 
@@ -155,7 +154,7 @@ The hash file is portable because it stores the report basename instead of a ful
 
 - Short reports give a quick overview of hardware, software, uptime, services, and top listening ports.
 - Full reports keep more detail but avoid very noisy sections like a full installed-package dump.
-- HTML reports use the same cleaned report content as the text versions.
+- HTML reports use the same report content in a simple page layout.
 
 ### Integrity verification
 
@@ -267,7 +266,7 @@ Menu path:
 4) Setup SSH Key Authentication
 ```
 
-The project now uses an `ed25519` SSH key when it generates one automatically.
+The project uses an `ed25519` SSH key when it generates one automatically.
 
 Manual equivalent:
 
