@@ -327,13 +327,13 @@ setup_cron() {
     echo "Current crontab:"
     crontab -l 2>/dev/null || echo "(empty)"
     echo ""
-    echo "Recommended cron entry (daily at 04:00 AM):"
+    echo "Recommended cron entry (daily at 08:00 AM):"
     echo ""
-    echo "  0 4 * * * ${SCRIPT_DIR}/main.sh --auto >> ${LOG_DIR}/cron.log 2>&1"
+    echo "  0 8 * * * ${SCRIPT_DIR}/main.sh --auto >> ${LOG_DIR}/cron.log 2>&1"
     echo ""
     read -rp "Add this cron entry? [y/N]: " CONFIRM
     if [[ "$CONFIRM" =~ ^[Yy]$ ]]; then
-        (crontab -l 2>/dev/null; echo "0 4 * * * ${SCRIPT_DIR}/main.sh --auto >> ${LOG_DIR}/cron.log 2>&1") | crontab -
+        (crontab -l 2>/dev/null; echo "0 8 * * * ${SCRIPT_DIR}/main.sh --auto >> ${LOG_DIR}/cron.log 2>&1") | crontab -
         echo -e "${GREEN}[+] Cron job added successfully${NC}"
         echo ""
         echo "Verify with: crontab -l"
