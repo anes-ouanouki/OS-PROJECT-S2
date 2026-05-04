@@ -4,7 +4,7 @@
 
 This project is a Bash-based system audit tool for Linux. It can generate short and full reports, save them as text and HTML, verify report integrity with SHA-256, send reports by email, copy reports to a remote host over SSH, and watch remote machines in real time.
 
----
+--
 
 ## Project Structure
 
@@ -295,6 +295,13 @@ Default suggested entry:
 ```text
 0 4 * * * /full/path/to/sys_audit/main.sh --auto >> /full/path/to/sys_audit/logs/cron.log 2>&1
 ```
+* * * * *
+| | | | |
+| | | | └── day of week
+| | | └──── month
+| | └────── day of month
+| └──────── hour
+└────────── minute
 
 You can also add it manually with:
 
